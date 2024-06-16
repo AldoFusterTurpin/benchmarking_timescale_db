@@ -58,3 +58,19 @@ func Test_getHostIdFromHostName(t *testing.T) {
 		})
 	}
 }
+
+// func TestProcessMeasurements(t *testing.T) {
+// 	type testCase struct {
+// 		name           string
+// 		measurementsCh <-chan *util_csv.Measurement
+// 		nWorkers       int
+// 	}
+// 	tests := []testCase{
+// 		// TODO: Add test cases.
+// 	}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			ProcessMeasurements(tt.measurementsCh, tt.nWorkers)
+// 		})
+// 	}
+// }

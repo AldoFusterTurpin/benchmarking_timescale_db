@@ -19,6 +19,8 @@ func (result *Result) String() string {
 	return fmt.Sprintf("result -> time spent is: %v\n", result.timeSpend)
 }
 
+// TODO: create a unit test for this to test business logic
+// independently from the worker pool.
 func consumAllResults(resultCh chan *Result) {
 	nQueriesProcessed := 0
 	var totalProcessingTime time.Duration

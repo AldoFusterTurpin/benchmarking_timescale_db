@@ -12,7 +12,7 @@ type ChanelOfChanels chan ChanelOfRequests
 // request contains what each worker should process.
 type Request struct {
 	// what to process
-	arg *util_csv.Measurement
+	measurement *util_csv.Measurement
 
 	// where to put the result after the processing
 	resultCh chan *Result

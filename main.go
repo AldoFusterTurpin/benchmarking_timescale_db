@@ -27,7 +27,8 @@ func main() {
 	rowsCh := getRowsToConsum()
 
 	nWorkers := 5
-	worker.ProcessMeasurements(rowsCh, nWorkers)
+	workerPool := worker.NewWorkerPool(nWorkers, rowsCh)
+	workerPool.ProcessMeasurements()
 }
 
 // getRowsToConsum returns a channel that returns a row every time we read from that chanel.
