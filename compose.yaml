@@ -1,0 +1,22 @@
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d homework"]
+      interval: 1s
+      timeout: 10s
+      retries: 30
+    volumes:
+      - ./data/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./data/cpu_usage.csv:/var/lib/postgresql/cpu_usage.csv
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+    - ./data/query_params.csv:/data/query_params.csv
