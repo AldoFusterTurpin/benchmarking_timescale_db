@@ -25,14 +25,16 @@ type mapOfQueues map[int]Queue
 type QueuesCh chan Queue
 
 type WorkerPool struct {
-	nWorkers       int
-	measurementsCh <-chan *util_csv.Measurement
+	nWorkers    int
+	inputChanel <-chan *util_csv.Measurement
+	processer   Processer
 }
 
-func NewWorkerPool(nWorkers int, measurementsCh <-chan *util_csv.Measurement) *WorkerPool {
+func NewWorkerPool(nWorkers int, inputChanel <-chan *util_csv.Measurement, processer Processer) *WorkerPool {
 	return &WorkerPool{
-		nWorkers:       nWorkers,
-		measurementsCh: measurementsCh,
+		nWorkers:    nWorkers,
+		inputChanel: inputChanel,
+		processer:   processer,
 	}
 }
 
@@ -42,18 +44,18 @@ func (wp *WorkerPool) ProcessMeasurements() {
 
 	queueOfWorkers := make(QueuesCh)
 
-	go wp.sendWorkToWorkers(queueOfWorkers, resultCh)
+	go wp.sendWorkToWorkers(queueOfWorkers, resultCh, wp.processer)
 	go wp.workers(queueOfWorkers)
 
 	consumAllResults(resultCh)
 }
 
-func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers QueuesCh, resultCh chan *Result) {
+func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers QueuesCh, resultCh chan *Result, processer Processer) {
 	var wg sync.WaitGroup
 
 	mapOfChannels := make(mapOfQueues)
 
-	for row := range wp.measurementsCh {
+	for row := range wp.inputChanel {
 		workerId, err := getWorkerIdForHostname(wp.nWorkers, row.Hostname)
 		if err != nil {
 			log.Printf("got error when getting worker id for hostname, skipping this row: %v\n", err)
@@ -68,11 +70,7 @@ func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers QueuesCh, resultCh chan *
 
 		queueOfWorkers <- mapOfChannels[workerId]
 
-		request := &Request{
-			measurement: row,
-			resultCh:    resultCh,
-			wg:          &wg,
-		}
+		request := NewRequest(row, resultCh, &wg, processer)
 
 		mapOfChannels[workerId] <- request
 	}

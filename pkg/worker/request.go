@@ -1,9 +1,7 @@
 package worker
 
 import (
-	"math/rand"
 	"sync"
-	"time"
 
 	util_csv "github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/csv"
 )
@@ -11,7 +9,17 @@ import (
 // a queue is a FIFO list of requests that a worker will read from it to do some work.
 type Queue chan *Request
 
-// Request contains what each worker should process.
+func NewRequest(measurement *util_csv.Measurement, resultCh chan *Result, wg *sync.WaitGroup,
+	processer Processer) *Request {
+	return &Request{
+		measurement: measurement,
+		resultCh:    resultCh,
+		wg:          wg,
+		processer:   processer,
+	}
+}
+
+// Request contains what each worker should process and a Processer to process the request.
 type Request struct {
 	// what to process
 	measurement *util_csv.Measurement
@@ -21,17 +29,11 @@ type Request struct {
 
 	// to indicate this request has finished processing
 	wg *sync.WaitGroup
+
+	// how the request should be processed
+	processer Processer
 }
 
-// fake processing to explore
 func (request *Request) Process() (*Result, error) {
-	now := time.Now()
-
-	d := time.Duration(rand.Intn(5))
-	time.Sleep(d * time.Second)
-
-	result := &Result{
-		timeSpend: time.Since(now),
-	}
-	return result, nil
+	return request.processer.Process()
 }

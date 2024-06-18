@@ -54,7 +54,7 @@ func consumAllResults(resultCh chan *Result) {
 
 	avarageQueryTime = totalProcessingTime / time.Duration(nQueriesProcessed)
 
-	format := "nQueriesProcessed: %v\ntotalProcessingTime: %v\nminQueryTime: %v\nmaxQueryTime: %v\nmedianQueryTime: %v\navarageQueryTime: %v"
+	format := "nQueriesProcessed: %v\ntotalProcessingTime: %v\nminQueryTime: %v\nmaxQueryTime: %v\nmedianQueryTime: %v\navarageQueryTime: %v\n"
 	log.Printf(format,
 		nQueriesProcessed, totalProcessingTime, minQueryTime, maxQueryTime, medianQueryTime, avarageQueryTime)
 }

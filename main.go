@@ -27,7 +27,8 @@ func main() {
 	rowsCh := getRowsToConsum()
 
 	nWorkers := 5
-	workerPool := worker.NewWorkerPool(nWorkers, rowsCh)
+	processer := worker.NewFakeProcesser()
+	workerPool := worker.NewWorkerPool(nWorkers, rowsCh, processer)
 	workerPool.ProcessMeasurements()
 }
 
