@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	util_csv "github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/csv"
 )
@@ -14,6 +13,16 @@ import (
 const (
 	hostnamePrefix = "host_"
 )
+
+// key: workerId.
+// value: at which queue we send the work.
+// To meet with the constraint that "queries for the same hostname
+// be executed by the same worker each time".
+type mapOfQueues map[int]Queue
+
+// each element of QueuesCh is the Queue of a specific worker.
+// So len(QueuesCh) will be equal to the number of workers we have.
+type QueuesCh chan Queue
 
 type WorkerPool struct {
 	nWorkers       int
@@ -28,93 +37,83 @@ func NewWorkerPool(nWorkers int, measurementsCh <-chan *util_csv.Measurement) *W
 }
 
 func (wp *WorkerPool) ProcessMeasurements() {
-	// resultCh tells where each worker should put the requests
+	// resultCh tells where each worker should put the result
 	resultCh := make(chan *Result)
 
-	workersCh := make(ChanelOfChanels)
+	queueOfWorkers := make(QueuesCh)
 
-	// key: workerId.
-	// value: at which chanel we send the work.
-	// To meet "with the constraint that queries for the same hostname
-	// be executed by the same worker each time".
-	mapOfChannels := make(map[int]ChanelOfRequests)
+	go wp.sendWorkToWorkers(queueOfWorkers, resultCh)
+	go wp.workers(queueOfWorkers)
 
-	go wp.sendWorkToWorkers(mapOfChannels, workersCh, resultCh)
-	go wp.workersDoTheWork(workersCh)
-
-	// TODO: instead of hardcoding what to do with the result,
-	// return in this method a chanel of results that the clients
-	// can use to perform the business logic.
 	consumAllResults(resultCh)
 }
 
-func (wp *WorkerPool) sendWorkToWorkers(mapOfWorkerAndChannels map[int]ChanelOfRequests, workersCh ChanelOfChanels, resultCh chan *Result) {
+func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers QueuesCh, resultCh chan *Result) {
 	var wg sync.WaitGroup
+
+	mapOfChannels := make(mapOfQueues)
 
 	for row := range wp.measurementsCh {
 		workerId, err := getWorkerIdForHostname(wp.nWorkers, row.Hostname)
 		if err != nil {
-			log.Printf("got error when getting worker id from hostname, skipping this row: %v\n", err)
+			log.Printf("got error when getting worker id for hostname, skipping this row: %v\n", err)
 			continue
 		}
 
-		// first time it will be nil for sure as problem statement wants us to process each line as soon
-		// as we read it. If we could load all input in memory at once to check for errors,
-		// we could instead first build the map and just pass the map to this function initialized.
-		if mapOfWorkerAndChannels[workerId] == nil {
-			mapOfWorkerAndChannels[workerId] = make(chan *Request)
+		if mapOfChannels[workerId] == nil {
+			mapOfChannels[workerId] = make(Queue)
 		}
 
 		wg.Add(1)
 
-		// send new workerCh to the chanel of workers
-		// TODO: I think this can be simplified and avoid that extra chanel of chanels,
-		// by starting the worker directly here.
-		workersCh <- mapOfWorkerAndChannels[workerId]
+		queueOfWorkers <- mapOfChannels[workerId]
 
 		request := &Request{
 			measurement: row,
 			resultCh:    resultCh,
 			wg:          &wg,
 		}
-		// send the request to the worker to do some work
-		mapOfWorkerAndChannels[workerId] <- request
+
+		mapOfChannels[workerId] <- request
 	}
 
-	fmt.Printf("mapOfChannels has length: %v\n", len(mapOfWorkerAndChannels))
+	fmt.Printf("mapOfChannels has length: %v\n", len(mapOfChannels))
 
-	// wait in a different Go routine to avoid blocking, common mistake
+	// wait in a different goroutine to avoid blocking the main goroutine
 	go func() {
 		wg.Wait()
 		close(resultCh)
 	}()
 }
 
-func (wp *WorkerPool) workersDoTheWork(workersCh ChanelOfChanels) {
-	for requestCh := range workersCh {
+// workers iterates over a queue of workers and invokes a new worker in each
+// go routine to process the tasks concurrently.
+func (wp *WorkerPool) workers(queueOfWorkers QueuesCh) {
+	for requestCh := range queueOfWorkers {
 		go wp.worker(requestCh)
 	}
 }
 
-// worker reads work to do from "requestCh" and performs some work,
+// worker receives work to do from "requestCh",
 // and sends the result to the corresponding channel specified in the request.
-func (wp *WorkerPool) worker(requestsCh ChanelOfRequests) {
+func (wp *WorkerPool) worker(requestsCh Queue) {
 	for request := range requestsCh {
-		now := time.Now()
-		fmt.Printf("worker started to process %v\n", *request)
+		fmt.Printf("worker started to process %v\n", request)
 
-		//random stuff to play for now:
-		result := &Result{
-			timeSpend: time.Since(now),
+		result, err := request.Process()
+		if err != nil {
+			log.Printf("received error processing request %v: %v\n", request, err)
+			continue
 		}
+
 		request.resultCh <- result
 		request.wg.Done()
 	}
 }
 
 // getWorkerIdForHostname returns the worker ID associated to the given hostname given nWorkers.
-// i,e: all the work of the "hostname" will be sent to the worker with id
-// where id is this function's return value.
+// i,e: all the work of the "hostname" will be sent to the worker
+// with id "id" where "id" is this function's return value.
 // We need this function as we can have more hostnames than workers.
 func getWorkerIdForHostname(nWorkers int, hostname string) (int, error) {
 	hostId, err := getHostIdFromHostName(hostname)
