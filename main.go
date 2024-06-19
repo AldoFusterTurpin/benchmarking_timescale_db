@@ -1,15 +1,19 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
-	"time"
+	"strconv"
 
 	util_csv "github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/csv"
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/db"
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/worker"
+)
+
+const (
+	defaultWorkers = 5
+	workersEnvName = "WORKERS"
 )
 
 func main() {
@@ -18,28 +22,38 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	log.Println("Successfully CONNECTED TO TIMESCALE_DB")
 
-	nRows, err := dbService.CountAllRows()
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("there are", nRows, "rows")
+	rowsCh := getRowsToConsumFromCsv("/data/query_params.csv")
 
-	t := time.Now()
+	nWorkers := getNumberOfWorkers()
 
-	rowsCh := getRowsToConsum("/data/query_params.csv")
-	nWorkers := 10
-	processer := worker.NewRandomProcesser()
-	workerPool := worker.NewWorkerPool(nWorkers, rowsCh, processer)
-
+	workerPool := worker.NewPool(nWorkers, rowsCh, dbService)
 	statsResult := workerPool.ProcessMeasurements()
+
+	log.Printf("executing worker pool with %v workers\n", nWorkers)
+
 	log.Println(statsResult)
-	fmt.Println("total execution time elapsed", time.Since(t))
 }
 
-// getRowsToConsum returns a channel that returns a row every time we read from that chanel.
-func getRowsToConsum(csvPath string) <-chan *domain.Measurement {
+func getNumberOfWorkers() int {
+	nWorkersStr := os.Getenv(workersEnvName)
+	if nWorkersStr == "" {
+		return defaultWorkers
+	}
+
+	nWorkers, err := strconv.Atoi(nWorkersStr)
+	if err != nil {
+		log.Printf("error pardsing workers variable: %v. using default value instead: %v", err, defaultWorkers)
+		return defaultWorkers
+	}
+	return nWorkers
+
+}
+
+// getRowsToConsumFromCsv returns a channel that returns a measurement every time we read from that chanel.
+func getRowsToConsumFromCsv(csvPath string) <-chan *domain.Measurement {
 	f, err := os.Open(csvPath)
 	if err != nil {
 		log.Fatal(err)

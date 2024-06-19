@@ -28,8 +28,8 @@ func (measurement *Measurement) String() string {
 
 type QueryResult struct {
 	Timestamp   time.Time
-	MaxCpuUsage float64
-	MinCpuUsage float64
+	MaxCPUUsage float64
+	MinCPUUsage float64
 }
 
 type QueryResultWithTime struct {

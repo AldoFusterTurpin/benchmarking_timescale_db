@@ -1,0 +1,7 @@
+SELECT time_bucket('1 minute', ts) AS bucket,
+    max(USAGE),
+    min(USAGE)
+FROM cpu_usage
+WHERE HOST = $1
+  AND ts BETWEEN $2::timestamp AND $3::timestamp
+GROUP BY bucket

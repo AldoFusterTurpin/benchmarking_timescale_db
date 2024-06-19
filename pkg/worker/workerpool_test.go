@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -83,11 +84,13 @@ func TestWorkerPool_ProcessMeasurements_HandlesBusinessLogic(t *testing.T) {
 		expected    *StatsResult
 	}
 
-	s1 := (0 + 1000 + 2000)
-	f1 := float64(0+1000+2000) / 3
+	sum1 := (0 + 10 + 20)
+	avarage1 := float64(0+10+20) / 3
+	median1 := 10
 
-	s2 := (0 + 1000 + 2000 + 3000 + 4000 + 5000)
-	f2 := float64(0+1000+2000+3000+4000+5000) / 6
+	sum2 := (0 + 10 + 20 + 30 + 40 + 50)
+	avarage2 := float64(0+10+20+30+40+50) / 6
+	median2 := 25
 
 	tests := []testCase{
 		// NewIncrementalProcesser() will return a processer that will block when used concurrently,
@@ -100,11 +103,11 @@ func TestWorkerPool_ProcessMeasurements_HandlesBusinessLogic(t *testing.T) {
 			processer:   NewIncrementalProcesser(),
 			expected: &StatsResult{
 				NQueriesProcessed:   3,
-				TotalProcessingTime: time.Duration(s1) * time.Millisecond,
+				TotalProcessingTime: time.Duration(sum1) * time.Millisecond,
 				MinQueryTime:        0 * time.Millisecond,
-				MaxQueryTime:        2000 * time.Millisecond,
-				AvarageQueryTime:    time.Duration(f1) * time.Millisecond,
-				MedianQueryTime:     0 * time.Millisecond,
+				MaxQueryTime:        20 * time.Millisecond,
+				AvarageQueryTime:    time.Duration(avarage1) * time.Millisecond,
+				MedianQueryTime:     time.Duration(median1) * time.Millisecond,
 			},
 		},
 		{
@@ -114,17 +117,17 @@ func TestWorkerPool_ProcessMeasurements_HandlesBusinessLogic(t *testing.T) {
 			processer:   NewIncrementalProcesser(),
 			expected: &StatsResult{
 				NQueriesProcessed:   6,
-				TotalProcessingTime: time.Duration(s2) * time.Millisecond,
+				TotalProcessingTime: time.Duration(sum2) * time.Millisecond,
 				MinQueryTime:        0 * time.Millisecond,
-				MaxQueryTime:        5000 * time.Millisecond,
-				AvarageQueryTime:    time.Duration(f2) * time.Millisecond,
-				MedianQueryTime:     0 * time.Millisecond,
+				MaxQueryTime:        50 * time.Millisecond,
+				AvarageQueryTime:    time.Duration(avarage2) * time.Millisecond,
+				MedianQueryTime:     time.Duration(median2) * time.Millisecond,
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wp := &WorkerPool{
+			wp := &Pool{
 				nWorkers:    tt.nWorkers,
 				inputChanel: tt.inputChanel,
 				processer:   tt.processer,
@@ -138,6 +141,40 @@ func TestWorkerPool_ProcessMeasurements_HandlesBusinessLogic(t *testing.T) {
 			}
 		})
 	}
+}
+
+func NewIncrementalProcesser() *IncrementalProcesser {
+	return &IncrementalProcesser{}
+}
+
+// IncrementalProcesser is a processer used for testing purposes where each time that
+// the Process() method is called it will take it on more second to process the next
+// time the Process() method is called. It can not be used to test the concurrent nature
+// of the worker pool as it contains a mutex that will be the bottleneck/wait point of the go routines.
+// To test the concurrent nature of the worker pool check "TestWorkerPool_ProcessMeasurementsIsConcurrentSafe"
+// which uses a non blocking RandomProcesser
+type IncrementalProcesser struct {
+	mu sync.Mutex
+	i  float64
+}
+
+// Process takes f.i seconds to process and returns that duration. f.i is incresaed by one
+// second every time the method is called.
+func (f *IncrementalProcesser) Process(ctx context.Context, measurement *domain.Measurement) (*domain.QueryResultWithTime, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	d := time.Duration(f.i) * time.Millisecond
+
+	// fake long running task
+	time.Sleep(d)
+
+	f.i += 10
+
+	return &domain.QueryResultWithTime{
+		Queryresults:       nil, // we don't care about this field for testing
+		QueryExecutionTime: d,
+	}, nil
 }
 
 func TestWorkerPool_ProcessMeasurementsIsConcurrentSafe(t *testing.T) {
@@ -155,7 +192,7 @@ func TestWorkerPool_ProcessMeasurementsIsConcurrentSafe(t *testing.T) {
 		// but it doesn't allow us to test the business logic. It is just used to ensure
 		// that the concurrent nature of the worker pool is correct, by doing
 		// go test -race -v ./...
-
+		// already done in the dockerfile
 		{
 			name:        "csv with 6 rows random processer",
 			nWorkers:    3,
@@ -167,7 +204,7 @@ func TestWorkerPool_ProcessMeasurementsIsConcurrentSafe(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wp := &WorkerPool{
+			wp := &Pool{
 				nWorkers:    tt.nWorkers,
 				inputChanel: tt.inputChanel,
 				processer:   tt.processer,
@@ -177,33 +214,66 @@ func TestWorkerPool_ProcessMeasurementsIsConcurrentSafe(t *testing.T) {
 	}
 }
 
-func NewIncrementalProcesser() *IncrementalProcesser {
-	return &IncrementalProcesser{}
+func NewRandomProcesser() *RandomProcesser {
+	return &RandomProcesser{}
 }
 
-// IncrementalProcesser is a processer used for testing purposes where each time that
-// the Process() method is called it will take it on more second to process the next
-// time the Process() method is called.
-type IncrementalProcesser struct {
-	mu sync.Mutex
-	i  float64
+// RandomProcesser used for playing without touching the DB
+type RandomProcesser struct {
 }
 
-// Process takes f.i seconds to process and returns that duration. f.i is incresaed by one
-// second every time the method is called.
-func (f *IncrementalProcesser) Process(ctx context.Context, measurement *domain.Measurement) (*domain.QueryResultWithTime, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (randomProcesser *RandomProcesser) Process(ctx context.Context, measurement *domain.Measurement) (*domain.QueryResultWithTime, error) {
+	randomDuration := time.Duration(rand.Intn(100)) * time.Millisecond
+	time.Sleep(randomDuration)
 
-	d := time.Duration(f.i) * time.Millisecond
-
-	// fake long running task
-	time.Sleep(d)
-
-	f.i += 1000
+	queryResults := []*domain.QueryResult{
+		{
+			Timestamp:   time.Now(),
+			MaxCPUUsage: 3000,
+			MinCPUUsage: 1000,
+		},
+	}
 
 	return &domain.QueryResultWithTime{
-		Queryresults:       nil, // we don't care about this field for testing
-		QueryExecutionTime: d,
+		Queryresults:       queryResults,
+		QueryExecutionTime: randomDuration,
 	}, nil
+}
+
+func Test_getMedian(t *testing.T) {
+	type testCase struct {
+		name string
+		s    []time.Duration
+		want time.Duration
+	}
+
+	f1 := 0
+	f2 := 6.5
+	f3 := 8
+
+	tests := []testCase{
+		{
+			name: "median of slice with 0 elements",
+			s:    nil,
+			want: time.Duration(f1),
+		},
+		{
+			name: "median of slice with even number of elements",
+			s:    []time.Duration{5, 2, 95, 2, 44, 5, 8, 9, 2, 46},
+			want: time.Duration(f2),
+		},
+		{
+			name: "median of slice with odd number of elements",
+			s:    []time.Duration{109, 5, 5, 8, 9, 2, 46},
+			want: time.Duration(f3),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getMedian(tt.s); got != tt.want {
+				t.Errorf("getMedian() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

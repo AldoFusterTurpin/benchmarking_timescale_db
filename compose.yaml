@@ -14,7 +14,10 @@ services:
       - ./data/init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./data/cpu_usage.csv:/var/lib/postgresql/cpu_usage.csv
   app:
-    build: .
+    build: 
+      context: .
+    environment:
+        - WORKERS
     depends_on:
       db:
         condition: service_healthy

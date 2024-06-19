@@ -13,7 +13,7 @@ import (
 func safeTimeParse(timeValue string) time.Time {
 	t, err := time.Parse(time.DateTime, timeValue)
 	if err != nil {
-		log.Fatal("safeTimeParse failed", err)
+		log.Fatal("safeTimeParse failed: ", err)
 	}
 	return t
 }
@@ -27,13 +27,13 @@ func Test_convertLineToRow(t *testing.T) {
 	}
 	tests := []testCase{
 		{
-			name:          "returns appropiate error when row has no columns",
+			name:          "returns appropriate error when row has no columns",
 			line:          nil,
 			expectedRow:   nil,
 			expectedError: errors.New("unexpected number of columns: 0"),
 		},
 		{
-			name:          "returns appropiate error when row has more columns than expected",
+			name:          "returns appropriate error when row has more columns than expected",
 			line:          []string{"host_000008", "2017-01-01 08:59:22", "2017-01-01 09:59:22", "unexpected_column"},
 			expectedRow:   nil,
 			expectedError: errors.New("unexpected number of columns: 4"),
@@ -46,15 +46,16 @@ func Test_convertLineToRow(t *testing.T) {
 				StartTime: safeTimeParse("2017-01-01 08:59:22"),
 				EndTime:   safeTimeParse("2017-01-01 09:59:22"),
 			},
+			expectedError: nil,
 		},
 		{
-			name:          "returns appropiate error when start_time has invalid format",
+			name:          "returns appropriate error when start_time has invalid format",
 			line:          []string{"host_000008", "1234", "2017-01-01 09:59:22"},
 			expectedRow:   nil,
 			expectedError: errors.New("parsing time \"1234\" as \"2006-01-02 15:04:05\": cannot parse \"\" as \"-\""),
 		},
 		{
-			name:          "returns appropiate error when end_time has invalid format",
+			name:          "returns appropriate error when end_time has invalid format",
 			line:          []string{"host_000008", "2017-01-01 08:59:22", "in-2017-valid"},
 			expectedRow:   nil,
 			expectedError: errors.New("parsing time \"in-2017-valid\" as \"2006-01-02 15:04:05\": cannot parse \"in-2017-valid\" as \"2006\""),

@@ -13,8 +13,8 @@ import (
 // CSV columns indexes
 const (
 	hostname = iota
-	start_time
-	end_time
+	startTime
+	endTime
 )
 
 const (
@@ -30,13 +30,13 @@ func ConvertLineToMeasurement(line []string) (*domain.Measurement, error) {
 
 	hostname := line[hostname]
 
-	startTimeStr := line[start_time]
+	startTimeStr := line[startTime]
 	startTime, err := time.Parse(timeFormat, startTimeStr)
 	if err != nil {
 		return nil, err
 	}
 
-	endTimeStr := line[end_time]
+	endTimeStr := line[endTime]
 	endTime, err := time.Parse(timeFormat, endTimeStr)
 	if err != nil {
 		return nil, err
@@ -66,19 +66,21 @@ func ReadMeasurements(reader io.Reader) <-chan *domain.Measurement {
 
 		for {
 			line, err := r.Read()
-			// log.Println("line is ", line)
 			if err == io.EOF {
 				break
 			}
 
 			if err != nil {
 				log.Printf("obtained error '%v' while reading line '%v', skipping line\n", err, line)
+				continue
 			}
 
 			measurement, err := ConvertLineToMeasurement(line)
 			if err != nil {
 				log.Printf("skiping line '%v' due to error: %v", line, err)
+				continue
 			}
+
 			measurementsToConsum <- measurement
 		}
 

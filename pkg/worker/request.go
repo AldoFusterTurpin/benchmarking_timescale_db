@@ -1,19 +1,16 @@
 package worker
 
 import (
-	"context"
 	"sync"
 
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 )
 
-func NewRequest(measurement *domain.Measurement, resultCh chan *domain.QueryResultWithTime, wg *sync.WaitGroup,
-	processer Processer) *Request {
+func NewRequest(measurement *domain.Measurement, resultCh chan *domain.QueryResultWithTime, wg *sync.WaitGroup) *Request {
 	return &Request{
 		measurement: measurement,
 		resultCh:    resultCh,
 		wg:          wg,
-		processer:   processer,
 	}
 }
 
@@ -27,11 +24,4 @@ type Request struct {
 
 	// to indicate this request has finished processing
 	wg *sync.WaitGroup
-
-	// how the request should be processed
-	processer Processer
-}
-
-func (request *Request) Process(ctx context.Context, m *domain.Measurement) (*domain.QueryResultWithTime, error) {
-	return request.processer.Process(ctx, request.measurement)
 }

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 )
@@ -21,21 +23,32 @@ const (
 // be executed by the same worker each time".
 type mapOfChannels map[int]chan *Request
 
-type WorkerPool struct {
+// queueOfWorkers represents a chanel where each element of it is the chanel of
+// requests of a specific worker. Each worker will be reading from just one chanel
+// and once it has a new request to read from it, it will process the request.
+type queueOfWorkers chan chan *Request
+
+// Processer defines a contract to process a request,
+// decoupling the data of the request with the actual processing of it.
+type Processer interface {
+	Process(ctx context.Context, m *domain.Measurement) (*domain.QueryResultWithTime, error)
+}
+
+type Pool struct {
 	nWorkers    int
 	inputChanel <-chan *domain.Measurement
 	processer   Processer
 }
 
-func NewWorkerPool(nWorkers int, inputChanel <-chan *domain.Measurement, processer Processer) *WorkerPool {
-	return &WorkerPool{
+func NewPool(nWorkers int, inputChanel <-chan *domain.Measurement, processer Processer) *Pool {
+	return &Pool{
 		nWorkers:    nWorkers,
 		inputChanel: inputChanel,
 		processer:   processer,
 	}
 }
 
-func (wp *WorkerPool) ProcessMeasurements() *StatsResult {
+func (wp *Pool) ProcessMeasurements() *StatsResult {
 	// resultCh tells where each worker should put the result.
 	// it will be shared in our case.
 	resultCh := make(chan *domain.QueryResultWithTime)
@@ -43,18 +56,18 @@ func (wp *WorkerPool) ProcessMeasurements() *StatsResult {
 	// queueOfWorkers acts as a multiplexer/scheduler of jobs.
 	// each value of queueOfWorkers is a chanel that one of the workers
 	// will be reading from to do some work.
-	queueOfWorkers := make(chan chan *Request)
+	queueOfWorkers := make(queueOfWorkers)
 
-	go wp.sendWorkToWorkers(queueOfWorkers, resultCh, wp.processer)
+	go wp.sendWorkToWorkers(queueOfWorkers, resultCh)
 	go wp.runWorkers(queueOfWorkers)
 
-	return consumAllResults(resultCh)
+	return wp.consumAllResults(resultCh)
 }
 
 // sendWorkToWorkers reads from the input chanel of the workerPool and creates a queueOfWorkers that is used
 // to track the work that each worker should perform. Each of the workers will be waiting for work in its
 // associated chanel.
-func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers chan chan *Request, resultCh chan *domain.QueryResultWithTime, processer Processer) {
+func (wp *Pool) sendWorkToWorkers(queueOfWorkers queueOfWorkers, resultCh chan *domain.QueryResultWithTime) {
 	var wg sync.WaitGroup
 
 	mapOfChannels := make(mapOfChannels)
@@ -76,9 +89,12 @@ func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers chan chan *Request, resul
 			queueOfWorkers <- mapOfChannels[workerId]
 		}
 
-		// and we send the request to the appropiate chanel of the specific "workerId"
+		// and we send the request to the appropriate chanel of the specific "workerId"
 		wg.Add(1)
-		request := NewRequest(row, resultCh, &wg, processer)
+		request := NewRequest(row, resultCh, &wg)
+
+		// log.Println("sending request to queue: ", *request)
+
 		mapOfChannels[workerId] <- request
 	}
 
@@ -105,7 +121,7 @@ func (wp *WorkerPool) sendWorkToWorkers(queueOfWorkers chan chan *Request, resul
 
 // runWorkers iterates over a chanel of chanels and invokes a new worker in each
 // chanel, where each chanel contains the jobs (requests) to process for the same worker.
-func (wp *WorkerPool) runWorkers(queueOfWorkers chan chan *Request) {
+func (wp *Pool) runWorkers(queueOfWorkers queueOfWorkers) {
 	for requestCh := range queueOfWorkers {
 		go wp.runSingleWorker(requestCh)
 	}
@@ -113,20 +129,95 @@ func (wp *WorkerPool) runWorkers(queueOfWorkers chan chan *Request) {
 
 // runSingleWorker receives work to do from "requestCh", does some work
 // and sends the result to the corresponding channel specified in the request.
-func (wp *WorkerPool) runSingleWorker(requestsCh chan *Request) {
+func (wp *Pool) runSingleWorker(requestsCh chan *Request) {
 	for request := range requestsCh {
 		// log.Printf("worker started to process %v\n", request)
 
 		ctx := context.Background()
 		resultOfRequest, err := wp.processer.Process(ctx, request.measurement)
 		if err != nil {
-			log.Printf("received error processing request %v: %v\n", request, err)
+			log.Printf("received error processing request %+v: %v\n", *request, err)
 			continue
 		}
 
 		request.resultCh <- resultOfRequest
 		request.wg.Done()
 	}
+}
+
+func (wp *Pool) consumAllResults(resultCh chan *domain.QueryResultWithTime) *StatsResult {
+	var queriesTime []time.Duration
+
+	nQueriesProcessed := 0
+
+	var totalProcessingTime time.Duration
+
+	var minQueryTime time.Duration
+
+	var maxQueryTime time.Duration
+
+	var avarageQueryTime time.Duration
+	i := 0
+
+	for queryResultWithTime := range resultCh {
+		executionTime := queryResultWithTime.QueryExecutionTime
+
+		queriesTime = append(queriesTime, executionTime)
+
+		firstValue := i == 0
+		if firstValue {
+			minQueryTime = executionTime
+			maxQueryTime = executionTime
+		} else {
+			if executionTime > maxQueryTime {
+				maxQueryTime = executionTime
+			}
+			if executionTime < minQueryTime {
+				minQueryTime = executionTime
+			}
+		}
+
+		nQueriesProcessed++
+		totalProcessingTime += executionTime
+
+		i++
+	}
+
+	avarageQueryTime = totalProcessingTime / time.Duration(nQueriesProcessed)
+
+	statsResult := &StatsResult{
+		NQueriesProcessed:   nQueriesProcessed,
+		TotalProcessingTime: totalProcessingTime,
+		MinQueryTime:        minQueryTime,
+		MaxQueryTime:        maxQueryTime,
+		MedianQueryTime:     getMedian(queriesTime),
+		AvarageQueryTime:    avarageQueryTime,
+	}
+
+	return statsResult
+}
+
+// getMedian returns the median of the slice s.
+// if len(s) is odd, it returns the value in the middle.
+// if len(s) is even it returns the avarage of the two values in the middle.
+func getMedian(s []time.Duration) time.Duration {
+	slices.Sort(s)
+
+	length := len(s)
+	if length == 0 {
+		return 0
+	}
+
+	middleIndex := length / 2
+
+	evenNumberOfElements := length%2 == 0
+	if evenNumberOfElements {
+		avarageOfTheTwoInTheMiddle := (s[middleIndex] + s[middleIndex-1]) / 2
+		return avarageOfTheTwoInTheMiddle
+	}
+
+	elementInTheMiddle := s[middleIndex]
+	return elementInTheMiddle
 }
 
 // getWorkerIdForHostname returns the worker ID associated to the given hostname given nWorkers.
