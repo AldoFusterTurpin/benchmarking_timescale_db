@@ -1,32 +1,41 @@
 package worker
 
 import (
+	"context"
 	"math/rand"
 	"time"
+
+	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 )
 
 // Processer is a contract to process a request, to decouple the data of the request
 // with the actual processing of it.
 type Processer interface {
-	Process() (*Result, error)
+	Process(ctx context.Context, m *domain.Measurement) (*domain.QueryResultWithTime, error)
 }
 
-func NewFakeProcesser() *FakeProcesser {
-	return &FakeProcesser{}
+func NewRandomProcesser() *RandomProcesser {
+	return &RandomProcesser{}
 }
 
-// FakeProcesser used for testing purposes.
-type FakeProcesser struct {
+// RandomProcesser used for playing without touching the DB
+type RandomProcesser struct {
 }
 
-func (FakeProcesser *FakeProcesser) Process() (*Result, error) {
-	now := time.Now()
+func (randomProcesser *RandomProcesser) Process(ctx context.Context, measurement *domain.Measurement) (*domain.QueryResultWithTime, error) {
+	randomDuration := time.Duration(rand.Intn(100)) * time.Millisecond
+	time.Sleep(randomDuration)
 
-	d := time.Duration(rand.Intn(5))
-	time.Sleep(d * time.Second)
-
-	result := &Result{
-		timeSpend: time.Since(now),
+	queryResults := []*domain.QueryResult{
+		{
+			Timestamp:   time.Now(),
+			MaxCpuUsage: 3000,
+			MinCpuUsage: 1000,
+		},
 	}
-	return result, nil
+
+	return &domain.QueryResultWithTime{
+		Queryresults:       queryResults,
+		QueryExecutionTime: randomDuration,
+	}, nil
 }

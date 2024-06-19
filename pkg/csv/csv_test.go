@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 )
 
 func safeTimeParse(timeValue string) time.Time {
@@ -20,7 +22,7 @@ func Test_convertLineToRow(t *testing.T) {
 	type testCase struct {
 		name          string
 		line          []string
-		expectedRow   *Measurement
+		expectedRow   *domain.Measurement
 		expectedError error
 	}
 	tests := []testCase{
@@ -39,10 +41,10 @@ func Test_convertLineToRow(t *testing.T) {
 		{
 			name: "can convert to row without errors",
 			line: []string{"host_000008", "2017-01-01 08:59:22", "2017-01-01 09:59:22"},
-			expectedRow: &Measurement{
-				Hostname:   "host_000008",
-				Start_time: safeTimeParse("2017-01-01 08:59:22"),
-				End_time:   safeTimeParse("2017-01-01 09:59:22"),
+			expectedRow: &domain.Measurement{
+				Hostname:  "host_000008",
+				StartTime: safeTimeParse("2017-01-01 08:59:22"),
+				EndTime:   safeTimeParse("2017-01-01 09:59:22"),
 			},
 		},
 		{
@@ -60,7 +62,7 @@ func Test_convertLineToRow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			row, err := convertLineToMeasurement(tt.line)
+			row, err := ConvertLineToMeasurement(tt.line)
 
 			if tt.expectedError != nil && err == nil {
 				t.Fatalf("expected error\n%v\n, but got nil error", tt.expectedError)

@@ -1,12 +1,14 @@
 package main
 
 import (
-	"encoding/csv"
+	"fmt"
 	"log"
 	"os"
+	"time"
 
 	util_csv "github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/csv"
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/db"
+	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/worker"
 )
 
@@ -24,23 +26,25 @@ func main() {
 	}
 	log.Println("there are", nRows, "rows")
 
-	rowsCh := getRowsToConsum()
+	t := time.Now()
 
-	nWorkers := 5
-	processer := worker.NewFakeProcesser()
+	rowsCh := getRowsToConsum("/data/query_params.csv")
+	nWorkers := 10
+	processer := worker.NewRandomProcesser()
 	workerPool := worker.NewWorkerPool(nWorkers, rowsCh, processer)
-	workerPool.ProcessMeasurements()
+
+	statsResult := workerPool.ProcessMeasurements()
+	log.Println(statsResult)
+	fmt.Println("total execution time elapsed", time.Since(t))
 }
 
 // getRowsToConsum returns a channel that returns a row every time we read from that chanel.
-func getRowsToConsum() <-chan *util_csv.Measurement {
-	csvPath := "/data/query_params.csv"
+func getRowsToConsum(csvPath string) <-chan *domain.Measurement {
 	f, err := os.Open(csvPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	r := csv.NewReader(f)
-	rowsToConsum := util_csv.ReadMeasurements(r)
+	rowsToConsum := util_csv.ReadMeasurements(f)
 	return rowsToConsum
 }

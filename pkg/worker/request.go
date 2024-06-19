@@ -1,15 +1,13 @@
 package worker
 
 import (
+	"context"
 	"sync"
 
-	util_csv "github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/csv"
+	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
 )
 
-// a queue is a FIFO list of requests that a worker will read from it to do some work.
-type Queue chan *Request
-
-func NewRequest(measurement *util_csv.Measurement, resultCh chan *Result, wg *sync.WaitGroup,
+func NewRequest(measurement *domain.Measurement, resultCh chan *domain.QueryResultWithTime, wg *sync.WaitGroup,
 	processer Processer) *Request {
 	return &Request{
 		measurement: measurement,
@@ -22,10 +20,10 @@ func NewRequest(measurement *util_csv.Measurement, resultCh chan *Result, wg *sy
 // Request contains what each worker should process and a Processer to process the request.
 type Request struct {
 	// what to process
-	measurement *util_csv.Measurement
+	measurement *domain.Measurement
 
 	// where to put the result after the processing
-	resultCh chan *Result
+	resultCh chan *domain.QueryResultWithTime
 
 	// to indicate this request has finished processing
 	wg *sync.WaitGroup
@@ -34,6 +32,6 @@ type Request struct {
 	processer Processer
 }
 
-func (request *Request) Process() (*Result, error) {
-	return request.processer.Process()
+func (request *Request) Process(ctx context.Context, m *domain.Measurement) (*domain.QueryResultWithTime, error) {
+	return request.processer.Process(ctx, request.measurement)
 }

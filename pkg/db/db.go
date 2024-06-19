@@ -3,10 +3,11 @@ package db
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/AldoFusterTurpin/benchmarking_timescale_db/pkg/domain"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -24,7 +25,7 @@ const (
 )
 
 type DBService struct {
-	dbConn *pgx.Conn
+	dbPool *pgxpool.Pool
 }
 
 func DefaultConnString() string {
@@ -32,33 +33,37 @@ func DefaultConnString() string {
 }
 
 // tryToConnect will try to connect to the "connString" every "d" units of time, a
-// "maxConnAttempts" number of times at maximum. It returns a connection to the DB and an error, if any.
-func tryToConnect(connString string, d time.Duration, maxConnAttempts int) (*pgx.Conn, error) {
+// "maxConnAttempts" number of times at maximum and create a connection pool.
+// It returns a connection pool to the DB and an error, if any.
+func tryToCreatePool(connString string, d time.Duration, maxConnAttempts int) (*pgxpool.Pool, error) {
 	ticker := time.NewTicker(d)
 	i := 0
 	var err error
+
 	for range ticker.C {
 		if i >= maxConnAttempts {
 			break
 		}
 
-		dbConn, err := pgx.Connect(context.Background(), connString)
+		dbPool, err := pgxpool.New(context.Background(), connString)
 		if err == nil {
-			return dbConn, nil
+			return dbPool, nil
 		}
+
 		i++
 	}
-	return nil, fmt.Errorf("unable to connect to database: %v", err)
+
+	return nil, fmt.Errorf("unable to create connection pool, maxConnAttempts tried: %v", err)
 }
 
 func NewDBService(connString string) (*DBService, error) {
-	dbConn, err := tryToConnect(connString, defaultConnectionTickerDuration, defaultMaxConnAttempts)
+	dbPool, err := tryToCreatePool(connString, defaultConnectionTickerDuration, defaultMaxConnAttempts)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	dbService := &DBService{
-		dbConn: dbConn,
+		dbPool: dbPool,
 	}
 
 	return dbService, nil
@@ -67,7 +72,7 @@ func NewDBService(connString string) (*DBService, error) {
 func (d *DBService) CountAllRows() (int, error) {
 	// rawQuery := "select * from cpu_usage where host = 'host_000000'"
 	rawQuery := "select * from cpu_usage"
-	rows, err := d.dbConn.Query(context.Background(), rawQuery)
+	rows, err := d.dbPool.Query(context.Background(), rawQuery)
 	if err != nil {
 		return 0, fmt.Errorf("query failed: %v", err)
 	}
@@ -84,4 +89,39 @@ func (d *DBService) CountAllRows() (int, error) {
 		// log.Println(ts, host, usage)
 	}
 	return i, nil
+}
+
+func (d *DBService) Process(ctx context.Context, req *domain.Measurement) (*domain.QueryResultWithTime, error) {
+	// not using p.dbPool.Query() as this includes the connection acquire,
+	// and we want to measure the time after we adquire the connection but before
+	// we execute the query!
+	conn, err := d.dbPool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+	rows, err := conn.Query(ctx, "select * from cpu_usage", req.Hostname, req.StartTime, req.EndTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// maybe we could to this here:
+	// timeDiff := time.Since(start)
+
+	var queryResults []*domain.QueryResult
+	for rows.Next() {
+		queryResult := &domain.QueryResult{}
+		err := rows.Scan(&queryResult.Timestamp, &queryResult.MaxCpuUsage, &queryResult.MinCpuUsage)
+		if err != nil {
+			return nil, fmt.Errorf("unable to scan row: %w", err)
+		}
+		queryResults = append(queryResults, queryResult)
+	}
+
+	timeDiff := time.Since(start)
+	return &domain.QueryResultWithTime{
+		Queryresults:       queryResults,
+		QueryExecutionTime: timeDiff,
+	}, nil
 }
